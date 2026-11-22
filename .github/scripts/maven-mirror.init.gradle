@@ -1,0 +1,25 @@
+// Maven Central rate-limits (HTTP 429) shared CI IPs. Send Maven Central requests to Google's mirror instead.
+def mirrorUrl = 'https://maven-central.storage-download.googleapis.com/maven2/'
+def redirectCentral = { repos ->
+    try {
+        repos.configureEach { repo ->
+            if (repo instanceof MavenArtifactRepository) {
+                def u = repo.url.toString()
+                if (u.startsWith('https://repo.maven.apache.org/maven2') || u.startsWith('https://repo1.maven.org/maven2')) {
+                    repo.url = mirrorUrl
+                }
+            }
+        }
+    } catch (Throwable t) {
+        println "maven-mirror init script: could not redirect repositories: ${t.message}"
+    }
+}
+gradle.beforeSettings { settings -> redirectCentral(settings.buildscript.repositories) }
+gradle.settingsEvaluated { settings ->
+    try { redirectCentral(settings.pluginManagement.repositories) } catch (Throwable t) { }
+    try { redirectCentral(settings.dependencyResolutionManagement.repositories) } catch (Throwable t) { }
+}
+gradle.beforeProject { project ->
+    redirectCentral(project.buildscript.repositories)
+    redirectCentral(project.repositories)
+}

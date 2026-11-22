@@ -130,6 +130,10 @@ termux_download() {
             f.write(patched + "\n" + wrapper)
         print("[*] Pre-flight: wrapped termux_download() successfully", flush=True)
 PYEOF
+mkdir -p .ci-cache
+if [ -f "${CI_PROJECT_DIR:-$PWD}/.github/scripts/maven-mirror.init.gradle" ]; then
+  cp -f "${CI_PROJECT_DIR:-$PWD}/.github/scripts/maven-mirror.init.gradle" .ci-cache/maven-mirror.init.gradle
+fi
 echo "[*] Pre-flight: breaking upstream dependency cycles for openjdk-17/gradle..."
 python3 - << 'PYEOF2'
 import re, os
@@ -163,5 +167,23 @@ sub_file("packages/libmpg123/mpg123.subpackage.sh",
 sub_file("packages/gradle/build.sh",
          r'^TERMUX_PKG_DEPENDS="openjdk-21 \| openjdk-25 \| openjdk-17"$',
          'TERMUX_PKG_DEPENDS="openjdk-17"', "gradle depends")
+# termux-am is built with Gradle inside the container. Maven Central answers shared CI IPs with
+# HTTP 429, so use Google's mirror (attempts 1 and 3), plain Maven Central (attempt 2), and retry.
+_GRADLE_CALL = r'^\t\$TERMUX_PKG_TMPDIR/gradle/gradle-\$_GRADLE_VERSION/bin/gradle \\\n\t\t:app:assembleRelease$'
+_GRADLE_NEW = """\tlocal _gradle_ok=false _attempt
+\tfor _attempt in 1 2 3; do
+\t\tlocal _init=()
+\t\tif [ "$_attempt" != 2 ] && [ -f "${TERMUX_SCRIPTDIR:-/home/builder/termux-packages}/.ci-cache/maven-mirror.init.gradle" ]; then
+\t\t\t_init=(--init-script "${TERMUX_SCRIPTDIR:-/home/builder/termux-packages}/.ci-cache/maven-mirror.init.gradle")
+\t\tfi
+\t\tif $TERMUX_PKG_TMPDIR/gradle/gradle-$_GRADLE_VERSION/bin/gradle "${_init[@]}" :app:assembleRelease; then
+\t\t\t_gradle_ok=true
+\t\t\tbreak
+\t\tfi
+\t\techo "termux-am: gradle attempt $_attempt failed, retrying in 45s..."
+\t\tsleep 45
+\tdone
+\t$_gradle_ok"""
+sub_file("packages/termux-am/build.sh", _GRADLE_CALL, lambda m: _GRADLE_NEW, "termux-am gradle mirror+retry")
 PYEOF2
 touch .ci-cache/.preflight_done

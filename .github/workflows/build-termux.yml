@@ -109,6 +109,11 @@ jobs:
           printf 'Defaults env_keep += "ANDROID_SDK_ROOT ANDROID_HOME JAVA_HOME LANG LC_ALL APP_NAME STARTUP_MESSAGE PACKAGE_NAME EXTRA_PACKAGES ICON_HUE_SHIFT"\n' | sudo tee /etc/sudoers.d/termux-build-env > /dev/null
           sudo chmod 0440 /etc/sudoers.d/termux-build-env
 
+      - name: Use Maven Central mirror for host Gradle builds
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          install -m 644 .github/scripts/maven-mirror.init.gradle "$HOME/.gradle/init.d/maven-mirror.gradle"
+
       - name: Hook pre-flight and branding into build-termux.sh
         run: |
           chmod +x build-termux.sh
