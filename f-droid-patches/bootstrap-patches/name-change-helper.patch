@@ -1,0 +1,133 @@
+--- a/packages/proot-distro/build.sh
++++ b/packages/proot-distro/build.sh
+@@ -19,6 +19,8 @@ TERMUX_PKG_AUTO_UPDATE=true
+ 
+ termux_step_pre_configure() {
+ 	termux_setup_python_pip
++	. "$TERMUX_SCRIPTDIR/scripts/termux_generator_utils.sh"
++	replace_termux_user_path "$TERMUX_PKG_SRCDIR" "$TERMUX_APP__USER_PATH"
+ }
+ 
+ termux_step_create_debscripts() {
+--- a/packages/termux-tools/build.sh
++++ b/packages/termux-tools/build.sh
+@@ -21,6 +21,16 @@ TERMUX_PKG_DEPENDS="bzip2, coreutils, curl, dash, diffutils, findutils, gawk, gr
+ TERMUX_PKG_RECOMMENDS="ed, dos2unix, inetutils, net-tools, patch, unzip"
+ 
+ termux_step_pre_configure() {
++	. "$TERMUX_SCRIPTDIR/scripts/termux_generator_utils.sh"
++   replace_termux_name "$TERMUX_PKG_SRCDIR" "$TERMUX_APP__PACKAGE_NAME"
++   replace_termux_user_path "$TERMUX_PKG_SRCDIR" "$TERMUX_APP__USER_PATH"
++	echo "Welcome to $TERMUX_APP__PACKAGE_NAME!
++This is a fork of \"F-Droid\" Termux!
++Do not report issues with this build upstream!
++========= Donate Here ===========
++https://termux.dev/en/donate.html
++https://opencollective.com/termux
++=================================" > motds/motd
+ 	autoreconf -vfi
+ }
+ 
+--- a/packages/termux-am/build.sh
++++ b/packages/termux-am/build.sh
+@@ -13,6 +13,9 @@ TERMUX_PKG_CONFLICTS="termux-tools (<< 0.51)"
+ _GRADLE_VERSION=8.10.2
+ 
+ termux_step_post_get_source() {
++	. "$TERMUX_SCRIPTDIR/scripts/termux_generator_utils.sh"
++	replace_termux_name "$TERMUX_PKG_SRCDIR" "$TERMUX_APP__PACKAGE_NAME"
++	migrate_termux_folder_tree "$TERMUX_PKG_SRCDIR" "$TERMUX_APP__PACKAGE_NAME"
+ 	sed -i'' -E -e "s|\@TERMUX_PREFIX\@|${TERMUX_PREFIX}|g" "$TERMUX_PKG_SRCDIR/am-libexec-packaged"
+ 	sed -i'' -E -e "s|\@TERMUX_APP_PACKAGE\@|${TERMUX_APP_PACKAGE}|g" "$TERMUX_PKG_SRCDIR/app/src/main/java/com/x11/termux/test/termuxam/FakeContext.java"
+ }
+diff --git a/packages/command-not-found/name-change-helper.patch b/packages/command-not-found/name-change-helper.patch
+new file mode 100644
+index 0000000..0250f2e
+--- /dev/null
++++ b/packages/command-not-found/name-change-helper.patch
+@@ -0,0 +1,16 @@
++diff --git a/generate-db.js b/generate-db.js
++index f1ff919..46d3c9b 100755
++--- a/generate-db.js
+++++ b/generate-db.js
++@@ -6,7 +6,10 @@ import { promisify } from "node:util";
++ 
++ const gunzipAsync = promisify(gunzip);
++ 
++-const { TERMUX_SCRIPTDIR, TERMUX_PREFIX, TERMUX_ARCH } = process.env;
+++const { TERMUX_SCRIPTDIR, TERMUX_ARCH } = process.env;
+++// command-not-found retrieves metadata from official package mirror,
+++// which stores packages built with official paths.
+++const TERMUX_PREFIX = "/data/data/com.termux/files/usr";
++ 
++ if (!TERMUX_SCRIPTDIR) {
++   throw new Error("TERMUX_PKG_CACHEDIR environment variable is not defined");
+diff --git a/packages/kew/build.sh b/packages/kew/build.sh
+index accef3e..78071bf 100644
+--- a/packages/kew/build.sh
++++ b/packages/kew/build.sh
+@@ -12,9 +12,10 @@ TERMUX_PKG_SUGGESTS="chroma-visualizer"
+ TERMUX_PKG_EXTRA_MAKE_ARGS="ARCH=$TERMUX_ARCH"
+ 
+ termux_step_post_get_source() {
+-	local original_prefix_component_one="/data/data/com."
++	local original_prefix_component_one_part_one="/data"
++	local original_prefix_component_one_part_two="/data/com."
+ 	local original_prefix_component_two="termux/files/usr"
+-	local original_prefix="${original_prefix_component_one}${original_prefix_component_two}"
++	local original_prefix="${original_prefix_component_one_part_one}${original_prefix_component_one_part_two}${original_prefix_component_two}"
+ 	find "$TERMUX_PKG_SRCDIR" -type f -print0 | \
+ 		xargs -0 sed -i -e "s%${original_prefix}%\@HARDCODED_TERMUX_PREFIX\@%g"
+ }
+--- a/packages/rust/build.sh
++++ b/packages/rust/build.sh
+@@ -91,24 +87,40 @@ termux_step_pre_configure() {
+-	local original_prefix_component_one="/data/data/com."
++	local original_prefix_component_one_part_one="/data"
++	local original_prefix_component_one_part_two="/data/com."
+ 	local original_prefix_component_two="termux/files/usr"
+-	local original_prefix="${original_prefix_component_one}${original_prefix_component_two}"
++	local original_prefix="${original_prefix_component_one_part_one}${original_prefix_component_one_part_two}${original_prefix_component_two}"
+ 	if [[ "$TERMUX_PREFIX" != "$original_prefix" ]]; then
+ 		local patch="$TERMUX_PKG_BUILDER_DIR/force-allow-edit-vendor.diff"
+ 		echo "Applying patch: $(basename "$patch")"
+ 		patch --silent -p1 <"$patch"
+ 
+ 		local crate=openssl-probe
+-		local crate_src_dir="$(realpath "$(find "$TERMUX_PKG_SRCDIR/vendor" -name "$crate"'*' | sort | tail -n1)")"
+-		local crate_dest_dir="$crate_src_dir-custom-termux-prefix"
+-		cp -r "$crate_src_dir" "$crate_dest_dir"
+-
+-		echo "Replacing '$original_prefix' with '$TERMUX_PREFIX' in '$crate_dest_dir/src/lib.rs'"
+-		sed -i -e "s|$original_prefix|$TERMUX_PREFIX|g" "$crate_dest_dir/src/lib.rs"
++		local crate_versions=()
++		local line
++		while read line; do
++			line="$(echo "$line" | perl -pe '($_)=/([0-9]+([.][0-9]+)+)/')"
++			crate_versions+=( "$line" )
++		done < <(find "$TERMUX_PKG_SRCDIR/vendor" -name "$crate"'*')
++
++		for crate_version in "${crate_versions[@]}"; do
++			local crate_src_dir="$TERMUX_PKG_SRCDIR/vendor/$crate-$crate_version"
++			local crate_dest_dir="$crate_src_dir-custom-termux-prefix"
++			cp -r "$crate_src_dir" "$crate_dest_dir"
++
++			echo "Replacing '$original_prefix' with '$TERMUX_PREFIX' in '$crate_dest_dir/src/lib.rs'"
++			sed -i -e "s|$original_prefix|$TERMUX_PREFIX|g" "$crate_dest_dir/src/lib.rs"
++			# sed -i -e "s|$original_prefix|$TERMUX_PREFIX|g" "$crate_src_dir/src/lib.rs"
++			# /usr/bin/sudo chattr +i "$crate_src_dir/src/lib.rs"
++		done
+ 
+ 		local dir
+ 		for dir in "$TERMUX_PKG_SRCDIR"/{,src/tools/cargo,src/tools/miri}; do
+ 			echo '' >>"$dir/Cargo.toml"
+ 			echo '[patch.crates-io]' >>"$dir/Cargo.toml"
+-			echo "$crate = { path = \"${crate_dest_dir}\" }" >>"$dir/Cargo.toml"
++			for crate_version in "${crate_versions[@]}"; do
++				local crate_src_dir="$TERMUX_PKG_SRCDIR/vendor/$crate-$crate_version"
++				local crate_dest_dir="$crate_src_dir-custom-termux-prefix"
++				echo "${crate}_${crate_version//./} = { package = \"$crate\", version = \"${crate_version}\", path = \"${crate_dest_dir}\" }" >>"$dir/Cargo.toml"
++			done
+ 		done
+ 	fi
+ 
