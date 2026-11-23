@@ -31,3 +31,9 @@ gradle-app.setting
 
 # plugin specific
 plugins/gradle-project/bin
+
+# CI / local build leftovers
+__pycache__/
+build.log
+build.log.gz
+.ci-cache/

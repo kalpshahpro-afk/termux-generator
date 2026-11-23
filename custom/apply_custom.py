@@ -45,7 +45,6 @@ from pathlib import Path
 
 DEFAULT_PACKAGE_NAME = "com.rebranded.termux"
 DEFAULT_APP_NAME = "Termux Rebranded"
-DEFAULT_STARTUP_MESSAGE = "Welcome to Termux Rebranded"
 
 ROOT = Path(__file__).resolve().parent.parent  # repository root (build-termux.sh lives here)
 APP_DIR = ROOT / "termux-apps-main" / "termux-app"
@@ -990,7 +989,9 @@ def env_flag(name, default):
 def main():
     package_name = env("PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
     app_name = env("APP_NAME", DEFAULT_APP_NAME)
-    startup_message = env("STARTUP_MESSAGE", DEFAULT_STARTUP_MESSAGE, allow_empty=True)
+    startup_message = env("STARTUP_MESSAGE", "", allow_empty=True)
+    if not startup_message.strip():
+        startup_message = "Welcome to %s" % app_name
     extra_packages = parse_package_list(env("EXTRA_PACKAGES", "", allow_empty=True))
     icon_hue_shift = env_flag("ICON_HUE_SHIFT", True)
 

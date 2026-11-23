@@ -30,7 +30,22 @@ done
 export EXTRA_PACKAGES="$RESOLVED_PACKAGES"
 echo "Resolved EXTRA_PACKAGES: $EXTRA_PACKAGES"
 
-CMD="./build-termux.sh --name ${PACKAGE_NAME} --type f-droid --architectures ${ARCHITECTURES}"
+# Validate the free-text inputs up front; they end up on a command line.
+ARCHITECTURES="${ARCHITECTURES//[[:space:]]/}"
+if [ -z "${APP_NAME//[[:space:]]/}" ]; then
+  echo "ERROR: app_name is empty - enter the app name you want (for example 'My Termux')"
+  exit 1
+fi
+if ! [[ "${PACKAGE_NAME:-}" =~ ^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$ ]]; then
+  echo "ERROR: invalid package_name '${PACKAGE_NAME:-}' (dot-separated parts made of letters and digits, e.g. com.example.termux)"
+  exit 1
+fi
+if ! [[ "${ARCHITECTURES:-}" =~ ^(aarch64|arm|i686|x86_64)(,(aarch64|arm|i686|x86_64))*$ ]]; then
+  echo "ERROR: invalid architectures '${ARCHITECTURES:-}' (comma-separated list of aarch64, arm, i686, x86_64)"
+  exit 1
+fi
+
+CMD=(./build-termux.sh --name "$PACKAGE_NAME" --type f-droid --architectures "$ARCHITECTURES")
 
 # Addon selection: ADDONS is "none" (default), "all", or a comma-separated subset of
 # the eight addon apps. Every addon that is not selected gets its --disable-* flag.
@@ -57,19 +72,19 @@ for a in $ALL_ADDONS; do
   if [ -n "${WANT_ADDON[$a]:-}" ]; then
     SELECTED_ADDONS="${SELECTED_ADDONS:+${SELECTED_ADDONS},}${a}"
   else
-    CMD="${CMD} --disable-${a}"
+    CMD+=("--disable-${a}")
   fi
 done
 echo "Selected addons: ${SELECTED_ADDONS:-none}"
 if [ -n "$EXTRA_PACKAGES" ]; then
-  CMD="${CMD} --add ${EXTRA_PACKAGES}"
+  CMD+=(--add "$EXTRA_PACKAGES")
 fi
 
 LOG_FILE="$CI_PROJECT_DIR/build.log"
-echo "Running: $CMD"
+echo "Running: ${CMD[*]}"
 echo "Full output -> $LOG_FILE (keeping the Actions log small)."
 
-eval "$CMD" > "$LOG_FILE" 2>&1 &
+"${CMD[@]}" > "$LOG_FILE" 2>&1 &
 BUILD_PID=$!
 
 while kill -0 "$BUILD_PID" 2>/dev/null; do

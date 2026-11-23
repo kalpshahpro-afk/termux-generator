@@ -11,17 +11,16 @@ on:
         type: string
         default: "com.rebranded.termux"
       app_name:
-        description: "App display name shown in Android launcher"
-        required: false
+        description: "App display name shown in the Android launcher (required)"
+        required: true
         type: string
-        default: "Termux Rebranded"
       startup_message:
-        description: "Startup message (MOTD) shown above the terminal prompt"
+        description: "Startup message (MOTD) shown above the terminal prompt. Leave empty for 'Welcome to <app name>'"
         required: false
         type: string
-        default: "Welcome to Termux Rebranded"
+        default: ""
       architectures:
-        description: "Comma-separated architectures (keep 'aarch64' on GitLab free tier)"
+        description: "Comma-separated architectures: aarch64, arm, i686, x86_64 (aarch64 covers nearly all phones)"
         required: false
         type: string
         default: "aarch64"
@@ -31,7 +30,7 @@ on:
         type: string
         default: "none"
       extra_packages:
-        description: "Comma-separated extra packages to pre-install, e.g. git,openssh,nano (fzf and tmux are always added)"
+        description: "Comma-separated extra packages to pre-install, e.g. git,openssh,openjdk-17,gradle (fzf and tmux are always added)"
         required: false
         type: string
         default: ""
@@ -123,6 +122,28 @@ jobs:
 
       - name: Build Termux
         run: bash .github/scripts/run-build.sh
+
+      - name: Build summary
+        if: always()
+        run: |
+          {
+            echo "### Termux build"
+            echo
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Package ID | \`${PACKAGE_NAME}\` |"
+            echo "| App name | ${APP_NAME//|/\\|} |"
+            echo "| Startup message | ${STARTUP_MESSAGE:-(default: Welcome to app name)} |"
+            echo "| Architectures | ${ARCHITECTURES} |"
+            echo "| Addons | ${ADDONS} |"
+            echo "| Extra packages | ${EXTRA_PACKAGES:-(none)}, fzf, tmux |"
+            echo
+            echo "Output files:"
+            echo
+            echo '```'
+            ls -lh ./*.apk ./*.zip ./build.log.gz 2>/dev/null || echo "(none)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APKs and build log
         if: always()
