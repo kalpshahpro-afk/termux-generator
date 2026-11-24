@@ -60,7 +60,7 @@ clean_artifacts() {
 # Funktion, um Repositories herunterzuladen
 download() {
     if [[ "$TERMUX_APP_TYPE" == "f-droid" ]]; then
-        git clone --depth 1 https://github.com/termux/termux-packages.git               termux-packages-main
+        clone_termux_packages https://github.com/termux/termux-packages.git             termux-packages-main
         git clone --depth 1 https://github.com/termux/termux-tasker.git                 termux-apps-main/termux-tasker
         git clone --depth 1 https://github.com/termux/termux-float.git                  termux-apps-main/termux-float
         git clone --depth 1 https://github.com/termux/termux-widget.git                 termux-apps-main/termux-widget

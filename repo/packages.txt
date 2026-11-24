@@ -1,0 +1,102 @@
+# Packages published to the custom apt repository (see README, "Package repository").
+#
+# One name per line, or comma-separated. '#' starts a comment.
+# List only what you want to be able to install: dependencies are built and published
+# automatically. A name can be a package, a sub-package (aapt2) or a "provides" alias (man).
+#
+# To add more packages later: append names here and push, then run the "Build package
+# repo" workflow (or run it with the add_packages input, which edits this file for you).
+
+# --- version control, networking, shells ---
+git
+gh
+openssh
+curl
+wget
+rsync
+mosh
+rclone
+cloudflared
+nmap
+socat
+dnsutils
+resolv-conf
+tmux
+zsh
+starship
+zoxide
+fzf
+yazi
+tree
+htop
+strace
+termux-api
+termux-services
+proot-distro
+
+# --- search, files, archives, text tools ---
+jq
+ripgrep
+fd
+bat
+eza
+which
+file
+patch
+zip
+unzip
+7zip
+zstd
+man
+age
+gnupg
+openssl-tool
+git-delta
+lazygit
+shellcheck
+shfmt
+neovim
+tree-sitter
+lua-language-server
+sqlite
+ffmpeg
+
+# --- languages and runtimes ---
+python
+python-pip
+python-cryptography
+python-lxml
+python-pillow
+python-numpy
+uv
+nodejs-lts
+golang
+rust
+rust-analyzer
+kotlin
+openjdk-21
+gradle
+
+# --- C/C++ toolchain and build tools ---
+clang
+lldb
+cmake
+make
+ninja
+autoconf
+automake
+libtool
+pkg-config
+binutils
+patchelf
+ccache
+
+# --- Android tooling ---
+apksigner
+aapt
+aapt2
+d8
+android-tools
+apktool
+aidl
+jadx

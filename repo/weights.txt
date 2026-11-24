@@ -1,0 +1,29 @@
+# Estimated build time in minutes per build dir (the directory name under packages/), used by
+# build_repo.py to decide whether a package still fits in the time left in the current
+# workflow run (a run has about 5.5 h). Measured times from earlier runs (timings.tsv in the
+# release) win over these numbers. Dirs not listed here are assumed to take 8 minutes.
+# Note: clang and lldb are built together with libllvm, aapt2/aidl together with aapt.
+# Format: <build dir> <minutes>
+libllvm 300
+rust 280
+nodejs-lts 170
+openjdk-21 120
+openjdk-17 100
+golang 60
+rust-analyzer 60
+ffmpeg 45
+uv 40
+yazi 30
+python 25
+git-delta 25
+starship 25
+gh 20
+cloudflared 20
+rclone 20
+eza 20
+ripgrep 20
+bat 20
+neovim 15
+lazygit 15
+zoxide 15
+fd 15

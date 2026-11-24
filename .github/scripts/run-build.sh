@@ -45,6 +45,20 @@ if ! [[ "${ARCHITECTURES:-}" =~ ^(aarch64|arm|i686|x86_64)(,(aarch64|arm|i686|x8
   exit 1
 fi
 
+# apt repository the app is configured with (consumed by the pre-flight patch of packages/apt).
+# Empty PACKAGE_REPO = the "repo" release of this GitHub repository.
+case "${PACKAGE_REPO:-}" in
+  "") REPO_URL="${GITHUB_REPOSITORY:+https://github.com/${GITHUB_REPOSITORY}/releases/download/repo/}" ;;
+  none) REPO_URL="" ;;
+  *) REPO_URL="$PACKAGE_REPO" ;;
+esac
+if [ -n "$REPO_URL" ] && ! [[ "$REPO_URL" =~ ^https://[A-Za-z0-9._~/%-]+/$ ]]; then
+  echo "ERROR: invalid package_repo '$REPO_URL' (use an https URL ending with /, 'none', or leave it empty)"
+  exit 1
+fi
+export REPO_URL
+echo "apt repository: ${REPO_URL:-official Termux repository}"
+
 CMD=(./build-termux.sh --name "$PACKAGE_NAME" --type f-droid --architectures "$ARCHITECTURES")
 
 # Addon selection: ADDONS is "none" (default), "all", or a comma-separated subset of

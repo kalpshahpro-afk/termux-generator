@@ -164,9 +164,12 @@ sub_file("packages/libmpg123/mpg123.subpackage.sh",
 
 # gradle lists "openjdk-21 | openjdk-25 | openjdk-17" and the build order takes the first
 # alternative, which would compile a second (huge) JDK. Pin it to the JDK we build anyway.
-sub_file("packages/gradle/build.sh",
-         r'^TERMUX_PKG_DEPENDS="openjdk-21 \| openjdk-25 \| openjdk-17"$',
-         'TERMUX_PKG_DEPENDS="openjdk-17"', "gradle depends")
+if os.environ.get("REPO_BUILD") == "1":
+    print("[=] gradle depends: package repository build, keeping the upstream JDK choice", flush=True)
+else:
+    sub_file("packages/gradle/build.sh",
+             r'^TERMUX_PKG_DEPENDS="openjdk-21 \| openjdk-25 \| openjdk-17"$',
+             'TERMUX_PKG_DEPENDS="openjdk-17"', "gradle depends")
 # termux-am is built with Gradle inside the container. Maven Central answers shared CI IPs with
 # HTTP 429, so use Google's mirror (attempts 1 and 3), plain Maven Central (attempt 2), and retry.
 _GRADLE_CALL = r'^\t\$TERMUX_PKG_TMPDIR/gradle/gradle-\$_GRADLE_VERSION/bin/gradle \\\n\t\t:app:assembleRelease$'
@@ -185,5 +188,31 @@ _GRADLE_NEW = """\tlocal _gradle_ok=false _attempt
 \tdone
 \t$_gradle_ok"""
 sub_file("packages/termux-am/build.sh", _GRADLE_CALL, lambda m: _GRADLE_NEW, "termux-am gradle mirror+retry")
+# Point apt at our own package repository. The official Termux packages are built for the
+# com.termux prefix and cannot work under another package ID, so the official repo is removed.
+repo_url = os.environ.get("REPO_URL", "").strip()
+if repo_url and repo_url != "none":
+    if not re.fullmatch(r"https://[A-Za-z0-9._~/%-]+/", repo_url):
+        raise SystemExit(f"ERROR: invalid REPO_URL '{repo_url}' (https URL ending with a slash)")
+    apt_path = "packages/apt/build.sh"
+    apt_old = (
+        '\t\techo "# The main termux repository, with cloudflare cache"\n'
+        '\t\techo "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"\n'
+        '\t\techo "# The main termux repository, without cloudflare cache"\n'
+        '\t\techo "# deb https://packages.termux.dev/apt/termux-main/ stable main"'
+    )
+    apt_new = (
+        '\t\techo "# Custom package repository (GitHub release built by the package-repo workflow)"\n'
+        f'\t\techo "deb [trusted=yes] {repo_url} ./"'
+    )
+    with open(apt_path, "r", encoding="utf-8") as f:
+        apt_text = f.read()
+    if apt_old not in apt_text:
+        raise SystemExit("ERROR: sources.list lines in packages/apt/build.sh changed upstream; update the pre-flight patch")
+    with open(apt_path, "w", encoding="utf-8") as f:
+        f.write(apt_text.replace(apt_old, apt_new))
+    print(f"[+] apt sources.list: using {repo_url}", flush=True)
+else:
+    print("[=] apt sources.list: keeping the official Termux repository", flush=True)
 PYEOF2
 touch .ci-cache/.preflight_done

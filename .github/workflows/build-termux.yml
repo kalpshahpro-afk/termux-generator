@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: ""
+      package_repo:
+        description: "apt repository the app installs packages from. Empty = the 'repo' release of this GitHub repo (see Build package repo), 'none' = official Termux repo (only works for com.termux), or an https URL ending in /"
+        required: false
+        type: string
+        default: ""
       icon_hue_shift:
         description: "Shift the hue of the neon-green >_ icon accent per package name so every sandbox APK gets its own colour (background stays #000000)"
         required: false
@@ -58,6 +63,7 @@ jobs:
       ADDONS: ${{ inputs.addons }}
       EXTRA_PACKAGES: ${{ inputs.extra_packages }}
       ICON_HUE_SHIFT: ${{ inputs.icon_hue_shift }}
+      PACKAGE_REPO: ${{ inputs.package_repo }}
       CI_PROJECT_DIR: ${{ github.workspace }}
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
@@ -105,7 +111,7 @@ jobs:
 
       - name: Keep build variables through sudo
         run: |
-          printf 'Defaults env_keep += "ANDROID_SDK_ROOT ANDROID_HOME JAVA_HOME LANG LC_ALL APP_NAME STARTUP_MESSAGE PACKAGE_NAME EXTRA_PACKAGES ICON_HUE_SHIFT"\n' | sudo tee /etc/sudoers.d/termux-build-env > /dev/null
+          printf 'Defaults env_keep += "ANDROID_SDK_ROOT ANDROID_HOME JAVA_HOME LANG LC_ALL APP_NAME STARTUP_MESSAGE PACKAGE_NAME EXTRA_PACKAGES ICON_HUE_SHIFT REPO_URL PACKAGE_REPO"\n' | sudo tee /etc/sudoers.d/termux-build-env > /dev/null
           sudo chmod 0440 /etc/sudoers.d/termux-build-env
 
       - name: Use Maven Central mirror for host Gradle builds
@@ -136,6 +142,7 @@ jobs:
             echo "| Startup message | ${STARTUP_MESSAGE:-(default: Welcome to app name)} |"
             echo "| Architectures | ${ARCHITECTURES} |"
             echo "| Addons | ${ADDONS} |"
+            echo "| Package repo | ${PACKAGE_REPO:-default (the repo release of this GitHub repository)} |"
             echo "| Extra packages | ${EXTRA_PACKAGES:-(none)}, fzf, tmux |"
             echo
             echo "Output files:"

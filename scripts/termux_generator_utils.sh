@@ -97,3 +97,31 @@ migrate_termux_folder_tree() {
 
     popd
 }
+
+# Clone termux-packages at the commit pinned in repo/termux-packages.rev (override with
+# TERMUX_PACKAGES_REV=<40-hex sha>, or TERMUX_PACKAGES_REV=latest for the newest commit).
+# Keeping the app's bootstrap and the package repository on the same snapshot matters:
+# packages built from different commits can disagree about library versions.
+clone_termux_packages() {
+    local url="$1"
+    local dest="$2"
+    local rev="${TERMUX_PACKAGES_REV:-}"
+
+    if [[ -z "$rev" && -f "${TERMUX_GENERATOR_HOME:-.}/repo/termux-packages.rev" ]]; then
+        rev="$(tr -d '[:space:]' < "${TERMUX_GENERATOR_HOME:-.}/repo/termux-packages.rev")"
+    fi
+
+    if [[ -z "$rev" || "$rev" == "latest" ]]; then
+        git clone --depth 1 "$url" "$dest"
+        return
+    fi
+    if ! [[ "$rev" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "[!] Invalid termux-packages revision '$rev' (expected a 40 character commit hash or 'latest')." >&2
+        return 1
+    fi
+    git init -q "$dest"
+    git -C "$dest" remote add origin "$url"
+    git -C "$dest" fetch -q --depth 1 origin "$rev"
+    git -C "$dest" checkout -q FETCH_HEAD
+    echo "[*] Using termux-packages at pinned commit ${rev:0:12}"
+}
