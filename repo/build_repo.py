@@ -262,7 +262,7 @@ class Stanza:
 
 def make_stanza(deb: Path, build_dir: str, rev: str) -> Stanza:
     ctrl = subprocess.run(["dpkg-deb", "-f", str(deb)], capture_output=True, text=True, check=True).stdout.strip("\n")
-    own = r"(Filename|Size|MD5sum|SHA1|SHA256|X-Build-Dir|X-Termux-Rev):"
+    own = r"(Filename|Size|MD5sum|SHA1|SHA256|X-Build-Dir|X-Termux-Rev|X-Termux-App):"
     kept = [ln for ln in ctrl.split("\n") if not re.match(own, ln)]
     kept += [
         f"Filename: {deb.name}",
@@ -272,6 +272,7 @@ def make_stanza(deb: Path, build_dir: str, rev: str) -> Stanza:
         f"SHA256: {file_hash(deb, 'sha256')}",
         f"X-Build-Dir: {build_dir}",
         f"X-Termux-Rev: {rev}",
+        f"X-Termux-App: {PACKAGE_NAME}",
     ]
     return Stanza("\n".join(kept))
 
@@ -492,6 +493,15 @@ class Runner:
         self.idx = Index.parse(read_asset("Packages", self.assets))
         self.failed = parse_tsv(read_asset("failed.tsv", self.assets))
         self.timings = parse_tsv(read_asset("timings.tsv", self.assets))
+        # Debs hold the app's data path (/data/data/<package>/...), so debs built for another
+        # package name (or before stanzas carried X-Termux-App) must never be reused or served.
+        stale = [d for d, ss in self.idx.by_dir.items()
+                 if any(st.fields.get("X-Termux-App") != PACKAGE_NAME for st in ss)]
+        for d in stale:
+            self.pending_deletes |= {st.filename for st in self.idx.by_dir.pop(d)}
+        if stale:
+            warn(f"dropped {len(stale)} build dirs published for a different package name")
+            self.index_dirty = True
 
     def weight(self, rel: str) -> float:
         measured = self.timings.get(rel)

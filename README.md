@@ -69,7 +69,7 @@ deb [trusted=yes] https://github.com/<owner>/<repo>/releases/download/repo/ ./
 ```
 
 so inside the app `pkg update && pkg install clang git` works. The repository must be built for
-the same `package_name` as the app (default `com.ksmusic.termux`). Until at least one run of
+the same `package_name` as the app (default `com.rebranded.termux`). Until at least one run of
 *Build package repo* has finished, the app's `pkg update` finds nothing; use `package_repo: none`
 to keep the official repository meanwhile.
 
