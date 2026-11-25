@@ -368,6 +368,9 @@ def read_asset(name: str, assets: set[str]) -> str:
 
 
 def upload_assets(paths: list[Path]) -> None:
+    for p in paths:
+        if p.stat().st_size == 0:  # GitHub answers "HTTP 400: Bad Content-Length" for empty files
+            p.write_text("\n")
     for i in range(0, len(paths), 20):
         chunk = [str(p) for p in paths[i:i + 20]]
         retry(lambda c=chunk: gh("release", "upload", TAG, *c, "--repo", GH_REPO, "--clobber"),
@@ -399,6 +402,8 @@ def fetch_debs(names: list[str], dest: Path) -> None:
 def parse_tsv(text: str) -> dict[str, list[str]]:
     rows: dict[str, list[str]] = {}
     for line in text.splitlines():
+        if line.startswith("#"):
+            continue
         parts = line.rstrip("\n").split("\t")
         if parts and parts[0]:
             rows[parts[0]] = parts[1:]
@@ -406,7 +411,9 @@ def parse_tsv(text: str) -> dict[str, list[str]]:
 
 
 def dump_tsv(rows: dict[str, list[str]]) -> str:
-    return "".join("\t".join([k, *v]) + "\n" for k, v in sorted(rows.items()))
+    # GitHub rejects empty release assets, so these files always carry a header line.
+    return "# managed by build_repo.py\n" + "".join(
+        "\t".join([k, *v]) + "\n" for k, v in sorted(rows.items()))
 
 
 # --------------------------------------------------------------------------- container
