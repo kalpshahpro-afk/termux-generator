@@ -47,6 +47,7 @@ DEFAULT_PACKAGE_NAME = "com.rebranded.termux"
 DEFAULT_APP_NAME = "Termux Rebranded"
 
 ROOT = Path(__file__).resolve().parent.parent  # repository root (build-termux.sh lives here)
+APPS_DIR = ROOT / "termux-apps-main"
 APP_DIR = ROOT / "termux-apps-main" / "termux-app"
 RES_DIR = APP_DIR / "app" / "src" / "main" / "res"
 ICON_SRC = ROOT / "custom" / "icon.png"
@@ -257,6 +258,75 @@ def apply_app_name(app_name, package_name):
     update_build_gradle(app_name)
     update_manifest(app_name, package_name)
     update_termux_constants(app_name)
+
+
+# --------------------------------------------------------------------------- #
+# Add-on app names (Termux:API, Termux:Boot, ...)
+# --------------------------------------------------------------------------- #
+
+ADDON_NAMES = ("API", "Boot", "Float", "Styling", "Tasker", "Widget", "GUI", "X11")
+ADDON_SKIP_DIRS = {".git", ".gradle", "build", "node_modules"}
+
+
+def xml_resource_escape(text):
+    """android_string_escape, made safe for the double-quoted <!ENTITY ... "..."> literals that the
+    add-ons use as well as for plain element text ("--" would end an XML comment)."""
+    out = android_string_escape(text).replace('\\"', '\\&#34;').replace("%", "&#37;")
+    return out.replace("--", "- -")
+
+
+def kotlin_string_escape(text):
+    return java_string_escape(text).replace("$", "\\$")
+
+
+def apply_addon_names(app_name, package_name, apps_dir=None):
+    """Rename the add-on apps from "<package>:API" to "<app name>:API", and so on.
+
+    The generator's global rename turns every "Termux:" into the package ID, so the add-ons end up
+    called e.g. "com.rebranded.termux:API". Only the exact "<package>:<AddonName>" strings are
+    rewritten; Maven coordinates such as "<package>:termux-am-library" never match.
+    """
+    apps_dir = Path(apps_dir) if apps_dir else APPS_DIR
+    if app_name == package_name:
+        return 0
+    pattern = re.compile(re.escape(package_name) + ":(" + "|".join(ADDON_NAMES) + ")(?![A-Za-z0-9_])")
+    escapers = {
+        ".xml": xml_resource_escape,
+        ".gradle": groovy_string_escape,
+        ".java": java_string_escape,
+        ".kt": kotlin_string_escape,
+        ".html": xml_attr_escape,
+    }
+    # The add-ons also describe the main app ("a plugin app for the Termux app") through their own
+    # TERMUX_APP_NAME definitions, which the global rename turned into the bare package ID.
+    main_name_defs = {
+        ".xml": re.compile(r'(<!ENTITY\s+TERMUX_APP_NAME\s+")' + re.escape(package_name) + '(")'),
+        ".gradle": re.compile(r'(manifestPlaceholders\.TERMUX_APP_NAME\s*=\s*")' + re.escape(package_name) + '(")'),
+    }
+    files = places = 0
+    for path in sorted(apps_dir.rglob("*")):
+        if path.suffix not in escapers or not path.is_file():
+            continue
+        if ADDON_SKIP_DIRS.intersection(path.relative_to(apps_dir).parts):
+            continue
+        try:
+            text = read_text(path)
+        except UnicodeDecodeError:
+            continue
+        if package_name + ":" not in text:
+            continue
+        replacement = escapers[path.suffix](app_name)
+        new_text, count = pattern.subn(lambda m: replacement + ":" + m.group(1), text)
+        if path.suffix in main_name_defs:
+            new_text, extra = main_name_defs[path.suffix].subn(
+                lambda m: m.group(1) + replacement + m.group(2), new_text)
+            count += extra
+        if count:
+            write_text(path, new_text)
+            files += 1
+            places += count
+    log("add-on names: %d place(s) in %d file(s) now read '%s:API' etc." % (places, files, app_name))
+    return places
 
 
 # --------------------------------------------------------------------------- #
@@ -1000,6 +1070,7 @@ def main():
         die("%s does not exist - run this after the app sources were downloaded" % rel(APP_DIR))
 
     apply_app_name(app_name, package_name)
+    apply_addon_names(app_name, package_name)
     helper_count = apply_startup_message(package_name, startup_message, app_name, extra_packages)
     hue = generate_icons(package_name, icon_hue_shift)
     log("summary: package=%s helpers=%d extra_packages=%s icon_hue=%s" % (
