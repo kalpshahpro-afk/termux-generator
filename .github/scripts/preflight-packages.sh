@@ -188,6 +188,47 @@ _GRADLE_NEW = """\tlocal _gradle_ok=false _attempt
 \tdone
 \t$_gradle_ok"""
 sub_file("packages/termux-am/build.sh", _GRADLE_CALL, lambda m: _GRADLE_NEW, "termux-am gradle mirror+retry")
+# libpcap: the fossies.org mirror in the recipe now answers HTTP 410. Same tarball, same checksum,
+# from the project's own site.
+sub_file("packages/libpcap/build.sh",
+         r'^TERMUX_PKG_SRCURL=https://fossies\.org/linux/misc/libpcap-',
+         'TERMUX_PKG_SRCURL=https://www.tcpdump.org/release/libpcap-', "libpcap source URL")
+# libsrt: GitHub changed how it packs tag archives, so the recipe's checksum no longer matches.
+# The files inside are identical to the v1.5.7 git tag (verified file by file); only the packing differs.
+sub_file("packages/libsrt/build.sh",
+         r'^TERMUX_PKG_SHA256=fee6aee6b4933f01ba8b7e18d5d9e4896ad604053fdad2ac55df4a4f1561f30a$',
+         'TERMUX_PKG_SHA256=017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b', "libsrt checksum")
+
+# NDK r30's libc++ no longer includes <float.h> transitively, so FLT_MAX / FLT_EPSILON / DBL_EPSILON
+# are undeclared in these C++ sources. Force-include it for them.
+_FLOAT_MARK = "# preflight: force-include float.h"
+_FLOAT_SNIPPET = (
+    "\n" + _FLOAT_MARK + " (NDK r30's libc++ no longer includes it transitively)\n"
+    "if declare -F termux_step_pre_configure > /dev/null; then\n"
+    "\teval \"__preflight_orig_pre_configure() $(declare -f termux_step_pre_configure | tail -n +2)\"\n"
+    "fi\n"
+    "termux_step_pre_configure() {\n"
+    "\tif declare -F __preflight_orig_pre_configure > /dev/null; then\n"
+    "\t\t__preflight_orig_pre_configure\n"
+    "\tfi\n"
+    "\tCXXFLAGS+=\" -include float.h\"\n"
+    "}\n"
+)
+def append_snippet(path, mark, snippet, label):
+    if not os.path.exists(path):
+        print(f"[!] {label}: {path} not found (skipped)", flush=True)
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    if mark in text:
+        print(f"[=] {label}: already patched", flush=True)
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text.rstrip("\n") + "\n" + snippet)
+    print(f"[+] {label}: patched {path}", flush=True)
+
+for _pkg in ("harfbuzz", "libjxl", "libopenmpt", "libllvm"):
+    append_snippet(f"packages/{_pkg}/build.sh", _FLOAT_MARK, _FLOAT_SNIPPET, f"{_pkg} float.h")
 # Point apt at our own package repository. The official Termux packages are built for the
 # com.termux prefix and cannot work under another package ID, so the official repo is removed.
 repo_url = os.environ.get("REPO_URL", "").strip()
@@ -212,6 +253,24 @@ if repo_url and repo_url != "none":
     with open(apt_path, "w", encoding="utf-8") as f:
         f.write(apt_text.replace(apt_old, apt_new))
     print(f"[+] apt sources.list: using {repo_url}", flush=True)
+    # `pkg update` / `pkg install` otherwise pick a random official mirror and overwrite sources.list.
+    # Official packages are built for com.termux and fail to unpack under another package ID.
+    tt_path = "packages/termux-tools/build.sh"
+    with open(tt_path, "r", encoding="utf-8") as f:
+        tt_text = f.read()
+    if "termux_step_post_get_source" in tt_text:
+        raise SystemExit("ERROR: termux-tools/build.sh now defines termux_step_post_get_source; update the pre-flight patch")
+    if "TERMUX_PKG_NO_MIRROR_SELECT" not in tt_text:
+        hook = (
+            "\n# preflight: keep the custom package repository, never switch to official mirrors\n"
+            "termux_step_post_get_source() {\n"
+            "\tgrep -q '^MIRROR_BASE_DIR=' \"$TERMUX_PKG_SRCDIR/scripts/pkg.in\" || termux_error_exit \"pkg.in layout changed\"\n"
+            "\tsed -i 's|^MIRROR_BASE_DIR=|TERMUX_PKG_NO_MIRROR_SELECT=1\\nMIRROR_BASE_DIR=|' \"$TERMUX_PKG_SRCDIR/scripts/pkg.in\"\n"
+            "}\n"
+        )
+        with open(tt_path, "w", encoding="utf-8") as f:
+            f.write(tt_text.rstrip("\n") + "\n" + hook)
+        print("[+] termux-tools: pkg keeps the custom repository", flush=True)
 else:
     print("[=] apt sources.list: keeping the official Termux repository", flush=True)
 PYEOF2

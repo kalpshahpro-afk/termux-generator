@@ -449,11 +449,14 @@ def restore_packages(idx: Index, dirs: list[str]) -> int:
 
 
 def clean_build_dirs() -> None:
-    """Drop source/build trees of finished packages so the runner does not run out of disk."""
+    """Drop source/build trees of finished packages so the runner does not run out of disk.
+
+The shared directories must stay: _cache (toolchain, host python) and the python crossenv
+prefix, whose own build/ directory is the build-side virtualenv that holds build-pip."""
     docker_exec(
         "bash", "-c",
         'for d in /home/builder/.termux-build/*/; do '
-        '[ "$(basename "$d")" = _cache ] && continue; '
+        'case "$(basename "$d")" in _cache|*-crossenv-prefix-*) continue;; esac; '
         'rm -rf "$d/src" "$d/build" "$d/massage"; done; true',
         check=False,
     )
