@@ -199,36 +199,40 @@ sub_file("packages/libsrt/build.sh",
          r'^TERMUX_PKG_SHA256=fee6aee6b4933f01ba8b7e18d5d9e4896ad604053fdad2ac55df4a4f1561f30a$',
          'TERMUX_PKG_SHA256=017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b', "libsrt checksum")
 
-# NDK r30's libc++ no longer includes <float.h> transitively, so FLT_MAX / FLT_EPSILON / DBL_EPSILON
-# are undeclared in these C++ sources. Force-include it for them.
-_FLOAT_MARK = "# preflight: force-include float.h"
-_FLOAT_SNIPPET = (
-    "\n" + _FLOAT_MARK + " (NDK r30's libc++ no longer includes it transitively)\n"
-    "if declare -F termux_step_pre_configure > /dev/null; then\n"
-    "\teval \"__preflight_orig_pre_configure() $(declare -f termux_step_pre_configure | tail -n +2)\"\n"
-    "fi\n"
-    "termux_step_pre_configure() {\n"
-    "\tif declare -F __preflight_orig_pre_configure > /dev/null; then\n"
-    "\t\t__preflight_orig_pre_configure\n"
-    "\tfi\n"
-    "\tCXXFLAGS+=\" -include float.h\"\n"
-    "}\n"
-)
-def append_snippet(path, mark, snippet, label):
-    if not os.path.exists(path):
-        print(f"[!] {label}: {path} not found (skipped)", flush=True)
-        return
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-    if mark in text:
-        print(f"[=] {label}: already patched", flush=True)
-        return
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text.rstrip("\n") + "\n" + snippet)
-    print(f"[+] {label}: patched {path}", flush=True)
-
-for _pkg in ("harfbuzz", "libjxl", "libopenmpt", "libllvm"):
-    append_snippet(f"packages/{_pkg}/build.sh", _FLOAT_MARK, _FLOAT_SNIPPET, f"{_pkg} float.h")
+# NDK r30 + Termux's include order: <float.h> no longer yields FLT_MAX / FLT_EPSILON / DBL_MAX / ...
+# in C++ code. -include float.h reaches the compiler but still defines nothing (most likely libc++'s
+# float.h wrapper is found twice with the same include guard, so clang's own float.h is never reached).
+# Several C++ sources rely on those macros without including <float.h> themselves (harfbuzz, libjxl,
+# libopenmpt, libllvm/lldb, libelf, openjdk-21, ...). So force-include a header that defines them from
+# the compiler's built-in values. A real <float.h> defining the same tokens afterwards is harmless.
+_FLOAT_HDR_REL = "scripts/preflight-float.h"
+_float_lines = [
+    "/* float.h macros from compiler built-ins; added by .github/scripts/preflight-packages.sh */",
+    "#ifndef PREFLIGHT_FLOAT_H",
+    "#define PREFLIGHT_FLOAT_H",
+    "#ifndef FLT_RADIX",
+    "#define FLT_RADIX __FLT_RADIX__",
+    "#endif",
+]
+for _p in ("FLT", "DBL", "LDBL"):
+    for _s in ("DIG", "MANT_DIG", "MIN_EXP", "MIN_10_EXP", "MAX_EXP", "MAX_10_EXP", "MAX", "EPSILON", "MIN"):
+        _float_lines += [f"#ifndef {_p}_{_s}", f"#define {_p}_{_s} __{_p}_{_s}__", "#endif"]
+_float_lines += ["#endif", ""]
+with open(_FLOAT_HDR_REL, "w", encoding="utf-8") as _f:
+    _f.write("\n".join(_float_lines))
+_tc_path = "scripts/build/toolchain/termux_setup_toolchain_30.sh"
+_tc_old = '\texport CXXFLAGS="$CFLAGS"\n'
+_tc_new = '\texport CXXFLAGS="$CFLAGS -include ${TERMUX_SCRIPTDIR}/' + _FLOAT_HDR_REL + '"\n'
+with open(_tc_path, "r", encoding="utf-8") as _f:
+    _tc_text = _f.read()
+if _tc_new in _tc_text:
+    print("[=] float.h macros: toolchain already patched", flush=True)
+elif _tc_text.count(_tc_old) == 1:
+    with open(_tc_path, "w", encoding="utf-8") as _f:
+        _f.write(_tc_text.replace(_tc_old, _tc_new))
+    print(f"[+] float.h macros: patched {_tc_path}", flush=True)
+else:
+    raise SystemExit(f"ERROR: CXXFLAGS line in {_tc_path} changed upstream; update the pre-flight patch")
 # Point apt at our own package repository. The official Termux packages are built for the
 # com.termux prefix and cannot work under another package ID, so the official repo is removed.
 repo_url = os.environ.get("REPO_URL", "").strip()
