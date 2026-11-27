@@ -199,6 +199,24 @@ sub_file("packages/libsrt/build.sh",
          r'^TERMUX_PKG_SHA256=fee6aee6b4933f01ba8b7e18d5d9e4896ad604053fdad2ac55df4a4f1561f30a$',
          'TERMUX_PKG_SHA256=017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b', "libsrt checksum")
 
+# vulkan-icd is a metapackage that depends on a Mesa/SwiftShader Vulkan driver. None of those is in the
+# repository (Mesa alone pulls in hundreds of MB), but ffmpeg -> libplacebo -> vulkan-icd, so
+# `pkg install ffmpeg` would fail with unmet dependencies. libplacebo only uses Vulkan when a driver is
+# present, so make the metapackage dependency-free. A driver can be added later (e.g. add mesa).
+_vk_path = "packages/vulkan-icd/build.sh"
+if os.path.exists(_vk_path):
+    with open(_vk_path, "r", encoding="utf-8") as _f:
+        _vk_text = _f.read()
+    _vk_new, _vk_n = re.subn(r'(?ms)^if \[ true = true \]; then\n.*?^fi\n', 'TERMUX_PKG_DEPENDS=""\n', _vk_text)
+    if _vk_n == 1:
+        with open(_vk_path, "w", encoding="utf-8") as _f:
+            _f.write(_vk_new)
+        print(f"[+] vulkan-icd: no driver dependency ({_vk_path})", flush=True)
+    else:
+        print("[=] vulkan-icd: recipe layout changed (nothing to change)", flush=True)
+else:
+    print(f"[!] vulkan-icd: {_vk_path} not found (skipped)", flush=True)
+
 # NDK r30 + Termux's include order: <float.h> no longer yields FLT_MAX / FLT_EPSILON / DBL_MAX / ...
 # in C++ code. -include float.h reaches the compiler but still defines nothing (most likely libc++'s
 # float.h wrapper is found twice with the same include guard, so clang's own float.h is never reached).
