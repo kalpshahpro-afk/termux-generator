@@ -24,6 +24,7 @@ What it does:
     3. App icon     -> custom/icon.png -> adaptive + legacy + round launcher icons;
                        with ICON_HUE_SHIFT the hue of the neon-green accent is rotated by a
                        SHA-256(PACKAGE_NAME)-derived angle (the #000000 background stays pure black)
+                       The add-on apps (API, Boot, Float, GUI, Styling, Tasker, Widget, X11) get the same icon.
 
 Only the standard library plus Pillow (PIL) is used.
 Exit code is non-zero when no strings.xml or no bootstrap archive was patched.
@@ -859,21 +860,24 @@ BG_COLOR_XML = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
-def remove_conflicting_icons():
+def remove_conflicting_icons(res_dir=None, dir_glob="mipmap*", stems=ICON_STEMS, quiet=False):
     """Delete icon resources that would clash with (or shadow) the PNGs we write.
 
     Gradle's mergeResources fails on duplicate resources, and an old
     mipmap-anydpi-*/ic_launcher_foreground.xml would silently win over our PNG.
     """
+    res_dir = Path(res_dir) if res_dir else RES_DIR
     removed = []
-    for d in sorted(RES_DIR.glob("mipmap*")):
+    for d in sorted(res_dir.glob(dir_glob)):
         if not d.is_dir():
             continue
         for f in sorted(d.iterdir()):
-            if f.is_file() and f.stem in ICON_STEMS and f.suffix.lower() != ".png":
+            if f.is_file() and f.stem in stems and f.suffix.lower() != ".png":
                 f.unlink()
                 removed.append("%s/%s" % (d.name, f.name))
-    log("icon: removed %d conflicting file(s)%s" % (len(removed), (": " + ", ".join(removed)) if removed else ""))
+    if not quiet:
+        log("icon: removed %d conflicting file(s)%s" % (len(removed), (": " + ", ".join(removed)) if removed else ""))
+    return removed
 
 
 def _flatten_on_black(img, image_mod):
@@ -940,6 +944,101 @@ def shift_hue(img, degrees, image_mod):
     return out
 
 
+# The add-on apps ship their own launcher icons. They are replaced with the same icon as the main
+# app (same hue shift). Each add-on declares its icon differently, so there are three layouts:
+#   mipmap   -> @mipmap/ic_launcher (+ round), like the main app (termux-gui)
+#   drawable -> @drawable/ic_launcher, an adaptive icon in drawable-anydpi-v26 (api, boot, ...)
+#   lorie    -> @mipmap/lorie_ic_launcher (+ round), prefixed names (termux-x11)
+ADDON_ICON_TARGETS = (
+    # (add-on directory, resource directory inside it, layout)
+    ("termux-api", "app/src/main/res", "drawable"),
+    ("termux-boot", "app/src/main/res", "drawable"),
+    ("termux-float", "app/src/main/res", "drawable"),
+    ("termux-styling", "app/src/main/res", "drawable"),
+    ("termux-tasker", "app/src/main/res", "drawable"),
+    ("termux-widget", "app/src/main/res", "drawable"),
+    ("termux-gui", "app/src/main/res", "mipmap"),
+    ("termux-x11", "lorie/src/main/res", "lorie"),
+)
+
+ICON_LAYOUTS = {
+    "mipmap": dict(base="mipmap", legacy="ic_launcher", round="ic_launcher_round",
+                   fg="ic_launcher_foreground", xml=ADAPTIVE_XML,
+                   xml_names=("ic_launcher", "ic_launcher_round")),
+    "lorie": dict(base="mipmap", legacy="lorie_ic_launcher", round="lorie_ic_launcher_round",
+                  fg="lorie_ic_launcher_foreground",
+                  xml=ADAPTIVE_XML.replace("@mipmap/ic_launcher_foreground", "@mipmap/lorie_ic_launcher_foreground"),
+                  xml_names=("lorie_ic_launcher", "lorie_ic_launcher_round")),
+    "drawable": dict(base="drawable", legacy="ic_launcher", round=None,
+                     fg="ic_launcher_foreground",
+                     xml=ADAPTIVE_XML.replace("@mipmap/", "@drawable/"),
+                     xml_names=("ic_launcher",)),
+}
+
+
+def _circle_mask(px, images):
+    Image, ImageDraw, lanczos = images["Image"], images["ImageDraw"], images["lanczos"]
+    ss = 4
+    m = Image.new("L", (px * ss, px * ss), 0)
+    ImageDraw.Draw(m).ellipse((0, 0, px * ss - 1, px * ss - 1), fill=255)
+    return m.resize((px, px), lanczos)
+
+
+def write_icon_set(res_dir, images, layout="mipmap", verbose=True):
+    """Write the adaptive foreground, legacy and (if the layout has one) round icons into res_dir."""
+    spec = ICON_LAYOUTS[layout]
+    Image, lanczos = images["Image"], images["lanczos"]
+    res_dir = Path(res_dir)
+    stems = tuple(s for s in (spec["legacy"], spec["round"], spec["fg"]) if s)
+    remove_conflicting_icons(res_dir, spec["base"] + "*", stems, quiet=not verbose)
+
+    written = 0
+    for density, px in ADAPTIVE_FOREGROUND_SIZES.items():
+        out_dir = res_dir / (spec["base"] + "-" + density.split("-", 1)[1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        images["foreground"].resize((px, px), lanczos).save(out_dir / (spec["fg"] + ".png"), "PNG", optimize=True)
+        written += 1
+        if verbose:
+            log("icon: adaptive foreground %s %dx%d" % (out_dir.name, px, px))
+
+    for density, px in LEGACY_SIZES.items():
+        out_dir = res_dir / (spec["base"] + "-" + density.split("-", 1)[1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        images["legacy"].resize((px, px), lanczos).save(out_dir / (spec["legacy"] + ".png"), "PNG", optimize=True)
+        written += 1
+        if spec["round"]:
+            round_icon = images["round"].resize((px, px), lanczos).convert("RGBA")
+            round_icon.putalpha(_circle_mask(px, images))
+            round_icon.save(out_dir / (spec["round"] + ".png"), "PNG", optimize=True)
+            written += 1
+        if verbose:
+            log("icon: legacy%s %s %dx%d" % (" + round" if spec["round"] else "", out_dir.name, px, px))
+
+    values_dir = res_dir / "values"
+    values_dir.mkdir(parents=True, exist_ok=True)
+    write_text(values_dir / "ic_launcher_custom_bg.xml", BG_COLOR_XML)
+    anydpi = res_dir / (spec["base"] + "-anydpi-v26")
+    anydpi.mkdir(parents=True, exist_ok=True)
+    for name in spec["xml_names"]:
+        write_text(anydpi / (name + ".xml"), spec["xml"])
+    return written
+
+
+def apply_addon_icons(images, apps_dir=None):
+    """Give every add-on app the same launcher icon as the main app."""
+    apps_dir = Path(apps_dir) if apps_dir else APPS_DIR
+    done = []
+    for name, sub, layout in ADDON_ICON_TARGETS:
+        res_dir = apps_dir / name / sub
+        if not res_dir.is_dir():
+            log("icon: add-on %s has no %s, skipped" % (name, sub))
+            continue
+        count = write_icon_set(res_dir, images, layout, verbose=False)
+        done.append(name)
+        log("icon: add-on %s: wrote %d PNGs (%s layout)" % (name, count, layout))
+    return done
+
+
 def generate_icons(package_name=DEFAULT_PACKAGE_NAME, hue_shift=False):
     if not ICON_SRC.is_file():
         log("icon: %s not found, icon step skipped" % rel(ICON_SRC))
@@ -974,8 +1073,6 @@ def generate_icons(package_name=DEFAULT_PACKAGE_NAME, hue_shift=False):
     else:
         log("icon: hue shift disabled (ICON_HUE_SHIFT=false), original accent colour kept")
 
-    remove_conflicting_icons()
-
     # ---- Adaptive foreground: whole icon on #000000, kept inside the 66/108 safe zone ----
     frac = max(bw, bh) / float(side)
     foreground = square
@@ -985,14 +1082,6 @@ def generate_icons(package_name=DEFAULT_PACKAGE_NAME, hue_shift=False):
         foreground = Image.new("RGB", (side, side), (0, 0, 0))
         foreground.paste(square.resize((inner, inner), lanczos), ((side - inner) // 2, (side - inner) // 2))
         log("icon: squircle exceeded the safe zone, scaled to %.1f%%" % (scale * 100))
-
-    written = 0
-    for density, px in ADAPTIVE_FOREGROUND_SIZES.items():
-        out_dir = RES_DIR / density
-        out_dir.mkdir(parents=True, exist_ok=True)
-        foreground.resize((px, px), lanczos).save(out_dir / "ic_launcher_foreground.png", "PNG", optimize=True)
-        written += 1
-        log("icon: adaptive foreground %s %dx%d" % (density, px, px))
 
     # ---- Legacy icons: trim the black margin, keep ~6% padding ----
     crop = square.crop(bbox)
@@ -1011,32 +1100,15 @@ def generate_icons(package_name=DEFAULT_PACKAGE_NAME, hue_shift=False):
     round_half = max(content * (0.5 + LEGACY_PADDING), _corner_radius(crop_mask) * 1.03 + 1)
     round_base = padded(round_half)
 
-    def circle_mask(px):
-        ss = 4
-        m = Image.new("L", (px * ss, px * ss), 0)
-        ImageDraw.Draw(m).ellipse((0, 0, px * ss - 1, px * ss - 1), fill=255)
-        return m.resize((px, px), lanczos)
+    images = {"Image": Image, "ImageDraw": ImageDraw, "lanczos": lanczos,
+              "foreground": foreground, "legacy": legacy_base, "round": round_base}
 
-    for density, px in LEGACY_SIZES.items():
-        out_dir = RES_DIR / density
-        out_dir.mkdir(parents=True, exist_ok=True)
-        legacy_base.resize((px, px), lanczos).save(out_dir / "ic_launcher.png", "PNG", optimize=True)
-        round_icon = round_base.resize((px, px), lanczos).convert("RGBA")
-        round_icon.putalpha(circle_mask(px))
-        round_icon.save(out_dir / "ic_launcher_round.png", "PNG", optimize=True)
-        written += 2
-        log("icon: legacy + round %s %dx%d" % (density, px, px))
-
-    # ---- Adaptive icon XML + background colour ----
-    values_dir = RES_DIR / "values"
-    values_dir.mkdir(parents=True, exist_ok=True)
-    write_text(values_dir / "ic_launcher_custom_bg.xml", BG_COLOR_XML)
-    anydpi = RES_DIR / "mipmap-anydpi-v26"
-    anydpi.mkdir(parents=True, exist_ok=True)
-    write_text(anydpi / "ic_launcher.xml", ADAPTIVE_XML)
-    write_text(anydpi / "ic_launcher_round.xml", ADAPTIVE_XML)
+    written = write_icon_set(RES_DIR, images, "mipmap", verbose=True)
     log("icon: wrote %d PNGs (5 densities x foreground/legacy/round), "
         "values/ic_launcher_custom_bg.xml and mipmap-anydpi-v26/ic_launcher{,_round}.xml" % written)
+
+    # The add-on apps (API, Boot, Float, Styling, Tasker, Widget, GUI, X11) get the same icon.
+    apply_addon_icons(images)
     return shift_deg
 
 
