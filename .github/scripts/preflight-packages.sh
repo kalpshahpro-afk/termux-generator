@@ -123,6 +123,22 @@ termux_download() {
             rm -f "$TMPF"
         done
     fi
+    if [ ! -f "$DESTINATION" ] && [[ "$CHECKSUM" =~ ^[0-9a-f]{64}$ ]]; then
+        # A mirror sometimes answers the CI runners with a small error page, which then fails the
+        # checksum test and the whole build. Retry a few times with a pause before giving up.
+        local TRY RTMP
+        for TRY in 1 2 3; do
+            RTMP="${DESTINATION}.retry.$$"
+            mkdir -p "$(dirname "$DESTINATION")"
+            curl -fsSL --connect-timeout 20 -o "$RTMP" "$URL" 2>/dev/null || true
+            if [ -f "$RTMP" ] && [ "$(sha256sum "$RTMP" | awk '{print $1}')" = "$CHECKSUM" ]; then
+                mv -f "$RTMP" "$DESTINATION"
+                break
+            fi
+            rm -f "$RTMP"
+            sleep $((TRY * 20))
+        done
+    fi
     _orig_termux_download "$@"
 }
 '''
@@ -131,6 +147,11 @@ termux_download() {
         print("[*] Pre-flight: wrapped termux_download() successfully", flush=True)
 PYEOF
 mkdir -p .ci-cache
+# Source tarballs kept in this repository (.github/source-cache): a mirror that answers the CI runners
+# with an error page cannot break the build. termux_download still verifies the SHA-256 of every file.
+if [ -d "${CI_PROJECT_DIR:-$PWD}/.github/source-cache" ]; then
+  cp -f "${CI_PROJECT_DIR:-$PWD}"/.github/source-cache/* .ci-cache/ 2>/dev/null || true
+fi
 if [ -f "${CI_PROJECT_DIR:-$PWD}/.github/scripts/maven-mirror.init.gradle" ]; then
   cp -f "${CI_PROJECT_DIR:-$PWD}/.github/scripts/maven-mirror.init.gradle" .ci-cache/maven-mirror.init.gradle
 fi
